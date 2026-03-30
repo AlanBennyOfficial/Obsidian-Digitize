@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateText } from "ai";
 import { google } from "@ai-sdk/google";
-import { openai, createOpenAI } from "@ai-sdk/openai";
+import { openai } from "@ai-sdk/openai";
 
 // ── System prompt for the transcription model ──────────────────────────────
 const SYSTEM_PROMPT = `You are an elite transcription AI. Extract all handwritten or printed text from the provided image/document. Output ONLY the transcribed text. Preserve all structure, headings, bullet points, and tables. If a word is completely illegible, write [illegible]. Do not wrap the output in markdown code blocks.`;
@@ -73,16 +73,13 @@ export async function POST(req: NextRequest) {
         break;
       }
 
-      case "local": {
-        // Local LLM via LM Studio / vLLM — uses OpenAI-compatible adapter
-        const localAI = createOpenAI({
-          baseURL: process.env.LOCAL_LLM_URL ?? "http://localhost:1234/v1",
-          apiKey: process.env.LOCAL_LLM_API_KEY ?? "local",
-        });
-        // "local-model-name" is resolved by the local server (e.g., LM Studio auto-serves it)
-        selectedModel = localAI("local-model-name");
-        break;
-      }
+      case "local":
+        // Local LLM is handled CLIENT-SIDE (see lib/local-llm.ts).
+        // The browser calls localhost directly — Vercel cannot reach it.
+        return NextResponse.json(
+          { error: "Local LLM requests are handled directly in the browser and should not reach this endpoint. Please ensure you are using the latest client." },
+          { status: 400 }
+        );
 
       default:
         return NextResponse.json(

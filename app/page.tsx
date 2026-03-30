@@ -13,18 +13,16 @@
 
 import dynamic from "next/dynamic";
 import { useState, useCallback } from "react";
-import { Sparkles, ChevronDown, AlertCircle, RotateCcw } from "lucide-react";
+import { Sparkles, ChevronDown, AlertCircle, RotateCcw, Server } from "lucide-react";
 
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { OutputPane } from "@/components/OutputPane";
+import { transcribeWithLocalLLM } from "@/lib/local-llm";
 
 /**
  * ExportBar and DropZone are loaded client-only (ssr: false) because:
  *  - ExportBar imports `jspdf` and `docx` which reference browser globals
- *    (window, document, Blob) and produce different output during SSR,
- *    causing React hydration mismatches.
- *  - DropZone uses the `capture` attribute and File/FileReader APIs which
- *    are not available in Node.js.
+ *  - DropZone uses the `capture` attribute and File/FileReader APIs
  */
 const ExportBar = dynamic(
   () => import("@/components/ExportBar").then((m) => ({ default: m.ExportBar })),
@@ -67,7 +65,7 @@ const MODELS: ModelConfig[] = [
   {
     value: "local",
     label: "Local LLM",
-    description: "Runs via LM Studio / vLLM on localhost",
+    description: "Calls LM Studio / vLLM directly from your browser",
     badge: "Private",
     badgeColor: "#f97316",
   },
@@ -81,6 +79,7 @@ export default function Home() {
   const [appState, setAppState] = useState<AppState>("idle");
   const [outputText, setOutputText] = useState<string>("");
   const [errorMsg, setErrorMsg] = useState<string>("");
+  const [localLlmUrl, setLocalLlmUrl] = useState<string>("http://localhost:1234");
 
   const isLoading = appState === "loading";
   const isDone = appState === "done";
@@ -109,22 +108,35 @@ export default function Home() {
     setErrorMsg("");
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("modelSelection", selectedModel);
+      let transcribedText: string;
 
-      const res = await fetch("/api/digitize", {
-        method: "POST",
-        body: formData,
-      });
+      if (selectedModel === "local") {
+        // ── LOCAL: call LM Studio directly from the browser ──────────
+        // This works because the browser runs on the user's machine,
+        // which is the same machine running LM Studio at localhost.
+        transcribedText = await transcribeWithLocalLLM(file, localLlmUrl);
+      } else {
+        // ── CLOUD: route through our server API (Gemini / OpenAI) ────
+        // API keys are stored server-side and never exposed to the browser.
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("modelSelection", selectedModel);
 
-      const data = await res.json();
+        const res = await fetch("/api/digitize", {
+          method: "POST",
+          body: formData,
+        });
 
-      if (!res.ok || data.error) {
-        throw new Error(data.error ?? `Server error (${res.status})`);
+        const data = await res.json();
+
+        if (!res.ok || data.error) {
+          throw new Error(data.error ?? `Server error (${res.status})`);
+        }
+
+        transcribedText = data.text ?? "";
       }
 
-      setOutputText(data.text ?? "");
+      setOutputText(transcribedText);
       setAppState("done");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "An unexpected error occurred.";
@@ -374,6 +386,81 @@ export default function Home() {
             </p>
           </div>
 
+          {/* Local LLM endpoint URL — only visible when "local" is selected */}
+          {selectedModel === "local" && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.25rem",
+                flex: 1,
+                minWidth: 200,
+              }}
+            >
+              <label
+                htmlFor="local-llm-url"
+                style={{
+                  fontSize: "0.7rem",
+                  fontWeight: 600,
+                  color: "var(--text-muted)",
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                }}
+              >
+                LM Studio URL
+              </label>
+              <div style={{ position: "relative" }}>
+                <Server
+                  size={14}
+                  color="var(--text-muted)"
+                  style={{
+                    position: "absolute",
+                    left: 10,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    pointerEvents: "none",
+                  }}
+                />
+                <input
+                  id="local-llm-url"
+                  type="text"
+                  value={localLlmUrl}
+                  onChange={(e) => setLocalLlmUrl(e.target.value)}
+                  disabled={isLoading}
+                  placeholder="http://localhost:1234"
+                  style={{
+                    width: "100%",
+                    padding: "0.5rem 0.75rem 0.5rem 2rem",
+                    background: "var(--bg-elevated)",
+                    border: "1px solid var(--border-dim)",
+                    borderRadius: "var(--radius)",
+                    color: "var(--text-primary)",
+                    fontSize: "0.8rem",
+                    fontFamily: "var(--font-mono)",
+                    outline: "none",
+                    transition: "border-color 0.18s",
+                  }}
+                  onFocus={(e) =>
+                    (e.target.style.borderColor = "#f97316")
+                  }
+                  onBlur={(e) =>
+                    (e.target.style.borderColor = "var(--border-dim)")
+                  }
+                />
+              </div>
+              <p
+                style={{
+                  fontSize: "0.7rem",
+                  color: "var(--text-muted)",
+                  lineHeight: 1.4,
+                }}
+              >
+                Calls your local model directly from the browser.
+                Enable CORS in LM Studio settings.
+              </p>
+            </div>
+          )}
+
           {/* Divider */}
           <div
             style={{
@@ -561,7 +648,7 @@ export default function Home() {
         }}
       >
         <p style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-          Obsidian Digitize — Zero-friction handwriting transcription
+          Obsidian Digitize - Zero friction handwriting digitization.
         </p>
         <p style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
           &copy; 2026 <a href="https://github.com/alanbennyofficial">Alan Benny</a> & <a href="https://github.com/aryandhuri">Aryan Dhuri</a>.
