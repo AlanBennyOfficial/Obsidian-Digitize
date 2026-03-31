@@ -1,0 +1,20 @@
+{
+    "name": "Obsidian Digitize",
+    "short_name": "Obsidian",
+    "share_target": {
+        "action": "/api/upload-from-share",
+        "method": "POST",
+        "enctype": "multipart/form-data",
+        "params": {
+            "files": [
+                {
+                    "name": "file",
+                    "accept": [
+                        "image/*",
+                        "application/pdf"
+                    ]
+                }
+            ]
+        }
+    }
+}
